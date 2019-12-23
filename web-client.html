@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <meta charset="utf-8">
+        <title>Hugh - HTML Renderer</title>
+        <link
+            rel="stylesheet"
+            href="https://cdnjs.cloudflare.com/ajax/libs/normalize/8.0.1/normalize.css">
+        <link
+            rel="stylesheet"
+            href="https://fonts.googleapis.com/css?family=Roboto:400,700&display=swap">
+
+        <style>
+            *, *::before, *::after {
+                box-sizing: inherit;
+            }
+            html {
+                box-sizing: border-box;
+                font-size: 62.5%;
+            }
+            body {
+                color: #333;
+                font-family: Roboto, sans-serif;
+                font-size: 1.6em;
+                letter-spacing: 0.01em;
+                line-height: 1.6;
+            }
+            h1 {
+                color: #ccc;
+                font-size: 2.4rem;
+                font-weight: normal;
+                margin: 1rem;
+            }
+            h2 {
+                color: #999;
+                font-size: 1.6rem;
+                font-weight: normal;
+                margin: 0;
+                padding: 0 0 1rem;
+                border-bottom: 0.1rem solid #ccc;
+            }
+            main {
+                max-width: 96rem;
+                margin: 0 auto;
+                display: flex;
+            }
+
+            .component-list-area {
+                width: 30rem;
+                margin: 2rem;
+            }
+            .component-list-area ul {
+                list-style: none;
+                margin: 2rem 0 0;
+                padding: 0;
+            }
+            .component-list-area li {
+                height: 5rem;
+                border-bottom: 0.1rem solid #ddd;
+            }
+            .component-list-area li:last-of-type {
+                border-bottom: none;
+            }
+            .component-list-area li:hover {
+                background: #eee;
+            }
+            .component-list-area button {
+                display: block;
+                width: 100%;
+                height: 100%;
+                padding: 1rem;
+                text-align: left;
+                background: none;
+                border: none;
+                cursor: pointer;
+            }
+
+            .preview-area {
+                flex: 1;
+                margin: 2rem;
+            }
+            .preview-area .preview-window {
+                position: relative;
+                border: 0.1rem solid #ccc;
+                margin: 2rem 0 0;
+            }
+            .preview-area .preview-window::before {
+                content: '';
+                display: block;
+                padding-top: calc(9 / 16 * 100%);
+            }
+            .preview-area .preview-window iframe {
+                position: absolute;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                border: none;
+            }
+        </style>
+    </head>
+    <body>
+        <h1>Hugh</h1>
+
+        <main>
+            <div class="component-list-area">
+                <h2>Components</h2>
+                <ul></ul>
+            </div>
+            <div class="preview-area">
+                <h2>Preview</h2>
+                <div class="preview-window">
+                    <iframe></iframe>
+                </div>
+            </div>
+        </main>
+
+        <script
+            src="https://code.jquery.com/jquery-3.4.1.js"
+            integrity="sha256-WpOohJOqMqqyKL9FccASB9O0KwACQJpFTUBLTYOVvVU="
+            crossorigin="anonymous">
+        </script>
+        <script>
+            class ReactiveResource extends EventTarget {
+                constructor (url) {
+                    super();
+                    this.url = url;
+                    this._lastRes = null;
+                    this._lastResValue = null;
+                    this._destroyed = false;
+                    this._watch();
+                }
+
+                get value () {
+                    if (this._lastRes) {
+                        return this._lastResValue;
+                    } else {
+                        return null;
+                    }
+                }
+
+                destroy () {
+                    this._destroyed = true;
+                }
+
+                async update () {
+                    const res = await fetch(this.url);
+                    this._lastRes = res;
+
+                    const oldValue = this._lastResValue;
+
+                    if (res.status === 200) {
+                        const type = res.headers.get('Content-Type');
+                        const isJson = type === 'application/json';
+                        if (isJson) {
+                            this._lastResValue = await res.json();
+                        } else {
+                            this._lastResValue = await res.text();
+                        }
+                    } else {
+                        this._lastResValue = null;
+                    }
+
+                    const newValue = this._lastResValue;
+                    const event = new CustomEvent('change', {
+                        detail: {
+                            oldValue,
+                            newValue,
+                        }
+                    });
+                    this.dispatchEvent(event);
+                }
+
+                async _watch () {
+                    let lastUpdatedAt = new Date;
+                    let lastEtag = null;
+
+                    const maybeUpdate = async () => {
+                        const res = await fetch(this.url, {
+                            method: 'HEAD',
+                        });
+                        if (res.status !== 204) {
+                            return;
+                        }
+                        const newEtag = res.headers.get('ETag');
+                        if (newEtag && newEtag !== lastEtag) {
+                            lastUpdatedAt = new Date;
+                            lastEtag = newEtag;
+                            await this.update();
+                        }
+                    };
+
+                    const wait = async () => {
+                        const now = new Date;
+                        const diffMs = now.getTime() - lastUpdatedAt.getTime();
+
+                        if (diffMs < 10 * 1000) {
+                            return new Promise(r => setTimeout(r, 500));
+                        }
+                        if (diffMs < 5 * 60 * 1000) {
+                            return new Promise(r => setTimeout(r, 2000));
+                        }
+                        return new Promise(r => setTimeout(r, 4000));
+                    };
+
+                    const loop = async () => {
+                        await maybeUpdate();
+                        await wait();
+                        if (!this._destroyed) {
+                            return loop();
+                        }
+                    };
+
+                    await loop();
+                }
+            }
+        </script>
+        <script>
+            const componentListRes = new ReactiveResource('/components');
+            componentListRes.addEventListener('change', function () {
+                const $ul = $('.component-list-area ul');
+                $ul.empty();
+                for (const comp of componentListRes.value) {
+                    $ul.append(`
+                        <li>
+                            <button type="button">
+                                ${comp}
+                            </button>
+                        </li>
+                    `);
+                }
+            });
+
+            const $previewIframe = $('.preview-area > .preview-window > iframe');
+            function setPreviewSrc (src) {
+                $previewIframe.attr('src', src);
+            }
+            function reloadPreview () {
+                $previewIframe[0].contentWindow.location.reload();
+            }
+
+            let currentComponent;
+            let currentComponentRes;
+            function viewComponent (name) {
+                if (currentComponent === name) {
+                    return;
+                }
+                if (currentComponentRes) {
+                    currentComponentRes.destroy();
+                }
+                const src = `/components/${name}`;
+                currentComponentRes = new ReactiveResource(src);
+                currentComponentRes.addEventListener('change', function (ev) {
+                    if (ev.detail.oldValue) {
+                        reloadPreview();
+                    }
+                });
+                setPreviewSrc(src);
+            }
+
+            const $ul = $('.component-list-area ul');
+            $ul.on('click', 'button', function () {
+                const comp = $(this).text().trim();
+                viewComponent(comp);
+            });
+        </script>
+    </body>
+</html>

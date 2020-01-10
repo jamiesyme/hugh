@@ -1,30 +1,15 @@
 const Electron = require('electron');
 
+const ComponentStore = require('./component-store');
+const RenderServer = require('./render-server');
 const WebServer = require('./web-server');
 
-const webServer = new WebServer();
+Electron.app.disableHardwareAcceleration();
+Electron.app.on('will-quit', (ev) => {
+	ev.preventDefault();
+});
+
+const compStore = new ComponentStore();
+const webServer = new WebServer(compStore);
 webServer.listen();
-
-/*
-let win;
-
-function createWindow () {
-	win = new Electron.BrowserWindow({
-		width: 800,
-		height: 600,
-		frame: false,
-		backgroundColor: '#2c3e50',
-		webPreferences: {
-			nodeIntegration: true,
-		},
-	});
-
-	win.loadFile('index.html');
-
-	win.on('closed', () => {
-		app.quit();
-	});
-}
-
-Electron.app.on('ready', createWindow);
-*/
+const renderServer = new RenderServer(compStore);

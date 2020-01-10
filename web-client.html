@@ -86,11 +86,41 @@
                 padding-top: calc(9 / 16 * 100%);
                 overflow: hidden;
             }
-            .preview-area .preview-window iframe {
+            .preview-area .preview-controls {
+                position: absolute;
+                top: 0;
+                left: 0;
+                right: 0;
+                z-index: 1;
+                padding: 5px;
+                display: flex;
+            }
+            .preview-area .preview-controls button {
+                background: none;
+                border: none;
+                padding: 0;
+                cursor: pointer;
+            }
+            .preview-area .preview-controls ion-icon {
+                visibility: hidden;
+                font-size: 24px;
+                color: #aaa;
+                display: block;
+            }
+            .preview-area .preview-window:hover ion-icon {
+                visibility: visible;
+            }
+            .preview-area .preview-controls button:hover ion-icon {
+                color: #333;
+            }
+            .preview-area iframe {
                 position: absolute;
                 top: 0;
                 left: 0;
                 border: none;
+            }
+            .preview-area iframe:fullscreen {
+                background: white;
             }
         </style>
     </head>
@@ -105,7 +135,19 @@
             <div class="preview-area">
                 <h2>Preview</h2>
                 <div class="preview-window">
-                    <iframe width="1920" height="1080">
+                    <div class="preview-controls">
+                        <div style="flex:1"></div>
+                        <button
+                            type="button"
+                            class="fullscreen-toggle">
+                            <ion-icon name="expand">
+                            </ion-icon>
+                        </button>
+                    </div>
+                    <iframe
+                        width="1920"
+                        height="1080"
+                        allow="fullscreen">
                     </iframe>
                 </div>
             </div>
@@ -116,11 +158,14 @@
             integrity="sha256-WpOohJOqMqqyKL9FccASB9O0KwACQJpFTUBLTYOVvVU="
             crossorigin="anonymous">
         </script>
+        <script src="https://unpkg.com/ionicons@4.5.10-0/dist/ionicons.js">
+        </script>
 
         <script>
             class ReactiveResource extends EventTarget {
                 constructor (url) {
                     super();
+
                     this.url = url;
                     this._lastRes = null;
                     this._lastResValue = null;
@@ -244,9 +289,14 @@
         <script type="module">
             const componentListRes = new ReactiveResource('/components');
             componentListRes.addEventListener('change', function () {
+                const fullList = componentListRes.value;
+                const sortedList = fullList.sort((a, b) => {
+                    return a.localeCompare(b);
+                });
+
                 const $ul = $('.component-list-area ul');
                 $ul.empty();
-                for (const comp of componentListRes.value) {
+                for (const comp of sortedList) {
                     $ul.append(`
                         <li>
                             <button type="button">
@@ -264,6 +314,15 @@
             function reloadPreview () {
                 $previewIframe[0].contentWindow.location.reload();
             }
+
+            $('.fullscreen-toggle').click(() => {
+                const isFullscreen = !!document.fullscreenElement;
+                if (isFullscreen) {
+                    document.exitFullscreen();
+                } else {
+                    $previewIframe[0].requestFullscreen();
+                }
+            });
 
             let currentComponent;
             let currentComponentRes;

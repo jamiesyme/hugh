@@ -1,10 +1,7 @@
-const Chokidar = require('chokidar');
 const Koa = require('koa');
-const Fs = require('fs');
-const Path = require('path');
-const Rollup = require('rollup');
-const RollupResolve = require('@rollup/plugin-node-resolve');
-const RollupSvelte = require('rollup-plugin-svelte');
+const Fs = require('fs').promises;
+
+const ComponentRenderer = require('./component-renderer');
 
 function hashString (str) {
 	let hash = 0, i, chr;
@@ -17,78 +14,27 @@ function hashString (str) {
 	return hash;
 }
 
-async function renderComponent (filename) {
-	const bundle = await Rollup.rollup({
-		input: filename,
-		plugins: [
-			RollupSvelte({
-				customElement: true,
-				tag: 'hugh-element',
-			}),
-			RollupResolve(),
-		],
-	});
-	const { output } = await bundle.generate({
-		format: 'es',
-	});
-	return output[0].code;
-}
-
-class ComponentStore {
-	constructor (dir = '.') {
-		this.dir = dir;
-		this.components = [];
-		this.etagByComponent = {};
-
-		const fileToCompRegex = /^(.*)\.svelte$/;
-		this.watcher = Chokidar.watch('*.svelte', {
-			cwd: dir,
-			ignored: /(^|[\/\\])\../, // Ignore dotfiles
-			persistent: true,
-		});
-		this.watcher.on('add', (path, stats) => {
-			const comp = fileToCompRegex.exec(path)[1];
-			this.components.push(comp);
-			this.etagByComponent[comp] = stats.mtime;
-		});
-		this.watcher.on('change', (path, stats) => {
-			const comp = fileToCompRegex.exec(path)[1];
-			this.etagByComponent[comp] = stats.mtime;
-		});
-		this.watcher.on('unlink', (path) => {
-			const comp = fileToCompRegex.exec(path)[1];
-			this.components = this.components.filter(c => c !== comp);
-			delete this.etagByComponent[comp];
-		});
-	}
-
-	listComponents () {
-		return this.components.slice();
-	}
-
-	hasComponent (name) {
-		return this.components.includes(name);
-	}
-
-	getComponentEtag (name) {
-		return this.etagByComponent[name];
-	}
-
-	getComponentFilename (name) {
-		return Path.resolve(this.dir, name + '.svelte');
-	}
-}
-
 class WebServer {
-	constructor () {
+	constructor (compStore) {
 		this.app = new Koa();
-		this.compStore = new ComponentStore();
+		this.compStore = compStore;
+		this.compEtags = {};
+
+		this.compStore.on('add', (compName) => {
+			this.compEtags[compName] = (new Date).getTime().toString();
+		});
+		this.compStore.on('change', (compName) => {
+			this.compEtags[compName] = (new Date).getTime().toString();
+		});
+		this.compStore.on('remove', (compName) => {
+			delete this.compEtags[compName];
+		});
 
 		this.app.use(async ctx => {
 			const compRegex = /\/components\/([^\/]+)/;
 
 			const route_getWebClient = async () => {
-				ctx.body = Fs.readFileSync('./web-client.html');
+				ctx.body = await Fs.readFile('./web-client.html');
 				ctx.set('Content-Type', 'text/html');
 			};
 
@@ -118,7 +64,7 @@ class WebServer {
 					return;
 				}
 
-				const compEtag = this.compStore.getComponentEtag(compName);
+				const compEtag = this.compEtags[compName];
 				ctx.set('ETag', compEtag);
 
 				if (ctx.method === 'HEAD') {
@@ -126,9 +72,8 @@ class WebServer {
 					return;
 				}
 
-				const compStore = this.compStore;
-				const compFilename = compStore.getComponentFilename(compName);
-				const compMjs = await renderComponent(compFilename);
+				const compPath = this.compStore.getComponentPath(compName);
+				const compMjs = await ComponentRenderer.render(compPath);
 
 				ctx.body = `
 					<style>

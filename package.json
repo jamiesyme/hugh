@@ -11,7 +11,7 @@
   "dependencies": {
     "@rollup/plugin-node-resolve": "^6.0.0",
     "chokidar": "^3.3.1",
-    "electron": "^7.1.7",
+    "electron": "^18.3.7",
     "koa": "^2.11.0",
     "rollup": "^1.27.13",
     "rollup-plugin-svelte": "^5.1.1",
